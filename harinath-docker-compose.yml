@@ -1,0 +1,143 @@
+services:
+# eureka server configurations
+  mpa-service-registry:
+    image: "harinathakkati/mpa-service-registry:v3"
+    container_name: mpa-service-registry
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: "curl --fail --silent localhost:8761/actuator/health | grep UP || exit 1"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    # extends:
+    #   file: common-config.yml
+    #   service: microservice-configserver-config
+    environment:
+      SPRING_APPLICATION_NAME: "mpa-service-registry"
+    networks:
+      - zettampa  
+
+#api gateway
+  mpa-api-gateway:
+    image: "harinathakkati/mpa-api-gateway:v1"
+    container_name: mpa-api-gateway
+    ports:
+      - "9090:9090"
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://mpa-service-registry:8761/eureka/
+    depends_on:
+      mpa-service-registry:
+        condition: service_healthy
+    networks:
+      - zettampa
+
+#mpa -client
+  keycloak-client:
+    image: "harinathakkati/keycloak-client:v1"
+    container_name: keycloak-client
+    ports:
+      - "9999:9999"
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://mpa-service-registry:8761/eureka/
+    depends_on:
+      mpa-service-registry:
+        condition: service_healthy
+    networks:
+      - zettampa
+
+# survey company database
+  survey-ms-db:
+    image: postgres:latest
+    container_name: survey-ms-db
+    ports:
+      - 5433:5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: survey-ms-db
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "survey-ms-db"]
+      interval: 10s
+      timeout: 5s
+      retries: 1
+      start_period: 10s
+
+    networks:
+      - zettampa
+# survey company service
+  survey-ms:
+    image: pavithrkumar/survey-ms:latest
+    container_name: survey-ms
+    ports:
+      - "9030:9030"
+    environment:
+      SPRING_APPLICATION_NAME: "survey-ms"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://survey-ms-db:5432/survey-ms-db"
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: test
+
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://mpa-service-registry:8761/eureka/
+
+    depends_on:
+      survey-ms-db:
+        condition: service_healthy
+      mpa-service-registry:
+        condition: service_healthy
+    networks:
+      - zettampa
+
+# keycloak web
+  keycloak_web:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: keycloak_web
+    # volumes:
+    #   - ./imports/realm-export.json:/opt/jboss/keycloak/imports/realm-export.json:ro
+    ports:
+      - "8080:8080"
+    environment:
+      # KEYCLOAK_IMPORT: /opt/jboss/keycloak/imports/realm-export.json
+      # KC_DB: postgres
+      # KC_DB_URL: jdbc:postgresql://keycloakdb:5432/keycloak
+      # KC_DB_USERNAME: keycloak
+      # KC_DB_PASSWORD: password
+
+      # KC_HOSTNAME: localhost
+      # KC_HOSTNAME_STRICT: false
+      # KC_HOSTNAME_STRICT_HTTPS: false
+
+      # KC_LOG_LEVEL: info
+      # KC_METRICS_ENABLED: true
+      # KC_HEALTH_ENABLED: true
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    command: start-dev
+    # depends_on:
+    #   - keycloakdb
+
+    deploy:
+      resources:
+        limits:
+          memory: 700m
+    networks:
+      - zettampa
+
+# #keycloak database
+#   keycloakdb:
+#     image: postgres:15
+#     container_name: keycloak-db
+#     ports:
+#       - 5434:5432
+#     # volumes:
+#     #   - postgres_data:/var/lib/postgresql/data
+#     environment:
+#       POSTGRES_DB: keycloak
+#       POSTGRES_USER: keycloak
+#       POSTGRES_PASSWORD: password
+#     networks:
+#       - zettampa
+
+networks:
+  zettampa:
+    driver: "bridge"
